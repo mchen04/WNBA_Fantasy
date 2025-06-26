@@ -1,0 +1,392 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model
+model User {
+  id                   String               @id @default(cuid())
+  email                String               @unique
+  googleId             String               @unique
+  name                 String?
+  avatar               String?
+  subscriptionTier     SubscriptionTier     @default(FREE)
+  subscriptionStatus   SubscriptionStatus?
+  stripeCustomerId     String?              @unique
+  stripeSubscriptionId String?              @unique
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  scoringConfigurations ScoringConfiguration[]
+  tradeAnalyses         TradeAnalysis[]
+  sessions              Session[]
+
+  @@index([email])
+  @@index([googleId])
+  @@index([stripeCustomerId])
+}
+
+// Session model for auth
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+// Player model
+model Player {
+  id             String         @id @default(cuid())
+  espnId         String         @unique
+  name           String
+  firstName      String?
+  lastName       String?
+  team           String
+  position       Position
+  jerseyNumber   Int?
+  height         String?
+  weight         Int?
+  birthDate      DateTime?
+  yearsExperience Int?
+  college        String?
+  activeStatus   Boolean        @default(true)
+  photoUrl       String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  stats               PlayerStats[]
+  fantasyScores       PlayerFantasyScore[]
+  consistencyMetrics  ConsistencyMetric[]
+  trendingAnalyses    TrendingAnalysis[]
+  waiverRecommendations WaiverRecommendation[]
+  injuries            PlayerInjury[]
+
+  @@index([name])
+  @@index([team])
+  @@index([position])
+  @@index([espnId])
+}
+
+// Player injury tracking
+model PlayerInjury {
+  id          String       @id @default(cuid())
+  playerId    String
+  status      InjuryStatus
+  description String?
+  reportedDate DateTime
+  returnDate  DateTime?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId])
+  @@index([active])
+}
+
+// Game model
+model Game {
+  id           String     @id @default(cuid())
+  espnGameId   String     @unique
+  date         DateTime
+  homeTeam     String
+  awayTeam     String
+  homeScore    Int?
+  awayScore    Int?
+  status       GameStatus
+  season       Int
+  attendance   Int?
+  venue        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  playerStats PlayerStats[]
+
+  @@index([date])
+  @@index([homeTeam])
+  @@index([awayTeam])
+  @@index([status])
+  @@index([espnGameId])
+}
+
+// Player statistics
+model PlayerStats {
+  id                     String   @id @default(cuid())
+  playerId               String
+  gameId                 String
+  date                   DateTime
+  minutes                Int
+  points                 Int
+  rebounds               Int
+  assists                Int
+  steals                 Int
+  blocks                 Int
+  turnovers              Int
+  fouls                  Int
+  fieldGoalsMade         Int
+  fieldGoalsAttempted    Int
+  threePointersMade      Int
+  threePointersAttempted Int
+  freeThrowsMade         Int
+  freeThrowsAttempted    Int
+  plusMinus              Int?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, gameId])
+  @@index([playerId])
+  @@index([gameId])
+  @@index([date])
+}
+
+// Scoring configuration
+model ScoringConfiguration {
+  id                      String   @id @default(cuid())
+  userId                  String
+  name                    String
+  isDefault               Boolean  @default(false)
+  pointsMultiplier        Float    @default(1)
+  reboundsMultiplier      Float    @default(1)
+  assistsMultiplier       Float    @default(1)
+  stealsMultiplier        Float    @default(2)
+  blocksMultiplier        Float    @default(2)
+  threePointersMultiplier Float    @default(1)
+  turnoversMultiplier     Float    @default(-1)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fantasyScores PlayerFantasyScore[]
+
+  @@index([userId])
+  @@index([isDefault])
+}
+
+// Player fantasy scores
+model PlayerFantasyScore {
+  id               String   @id @default(cuid())
+  playerId         String
+  date             DateTime
+  scoringConfigId  String
+  fantasyPoints    Float
+  seasonAverage    Float?
+  last7DaysAverage Float?
+  last14DaysAverage Float?
+  last30DaysAverage Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  player         Player               @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  scoringConfig  ScoringConfiguration @relation(fields: [scoringConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, date, scoringConfigId])
+  @@index([playerId])
+  @@index([date])
+  @@index([scoringConfigId])
+}
+
+// Consistency metrics
+model ConsistencyMetric {
+  id                           String           @id @default(cuid())
+  playerId                     String
+  date                         DateTime
+  standardDeviation7Days       Float
+  standardDeviation14Days      Float
+  standardDeviation30Days      Float
+  coefficientOfVariation7Days  Float
+  coefficientOfVariation14Days Float
+  coefficientOfVariation30Days Float
+  consistencyGrade             ConsistencyGrade
+  gamesPlayed7Days             Int
+  gamesPlayed14Days            Int
+  gamesPlayed30Days            Int
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, date])
+  @@index([playerId])
+  @@index([date])
+  @@index([consistencyGrade])
+}
+
+// Trending analysis
+model TrendingAnalysis {
+  id                   String         @id @default(cuid())
+  playerId             String
+  date                 DateTime
+  minutesTrend         TrendDirection
+  minutesTrendValue    Float
+  performanceTrend     TrendDirection
+  performanceTrendValue Float
+  hotFactor            Float
+  isHot                Boolean
+  recentAverage        Float
+  seasonAverage        Float
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, date])
+  @@index([playerId])
+  @@index([date])
+  @@index([isHot])
+}
+
+// Trade analysis
+model TradeAnalysis {
+  id               String             @id @default(cuid())
+  userId           String
+  playerIdsIn      String[]
+  playerIdsOut     String[]
+  netValue         Float
+  recommendation   TradeRecommendation
+  confidence       Float
+  valueIn          Float
+  valueOut         Float
+  slotValue        Float
+  slotDifference   Int
+  notes            String?
+  saved            Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Waiver recommendations
+model WaiverRecommendation {
+  id                    String   @id @default(cuid())
+  date                  DateTime
+  playerId              String
+  recommendationScore   Float
+  projectedFantasyPoints Float
+  hotFactor             Float
+  minutesTrend          Float
+  matchupFavorability   Float
+  opponentTeam          String
+  rank                  Int
+  reasoning             String
+  createdAt             DateTime @default(now())
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([date, playerId])
+  @@index([date])
+  @@index([playerId])
+  @@index([rank])
+}
+
+// Usage tracking
+model UsageTracking {
+  id                   String           @id @default(cuid())
+  userId               String
+  feature              String
+  count                Int              @default(1)
+  lastUsed             DateTime         @default(now())
+  period               DateTime
+  subscriptionTier     SubscriptionTier
+  createdAt            DateTime         @default(now())
+
+  @@unique([userId, feature, period])
+  @@index([userId])
+  @@index([feature])
+  @@index([period])
+}
+
+// API rate limiting
+model RateLimit {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  count     Int      @default(0)
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@index([resetAt])
+}
+
+// Enums
+enum SubscriptionTier {
+  FREE
+  PRO
+  PRO_PLUS
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  INCOMPLETE
+  TRIALING
+}
+
+enum Position {
+  G
+  F
+  C
+  G_F
+  F_C
+}
+
+enum InjuryStatus {
+  HEALTHY
+  QUESTIONABLE
+  DOUBTFUL
+  OUT
+  DAY_TO_DAY
+}
+
+enum GameStatus {
+  SCHEDULED
+  IN_PROGRESS
+  FINAL
+  POSTPONED
+  CANCELED
+}
+
+enum ConsistencyGrade {
+  A_PLUS
+  A
+  A_MINUS
+  B_PLUS
+  B
+  B_MINUS
+  C_PLUS
+  C
+  C_MINUS
+  D
+  F
+}
+
+enum TrendDirection {
+  UP
+  DOWN
+  STABLE
+}
+
+enum TradeRecommendation {
+  ACCEPT
+  DECLINE
+  NEUTRAL
+}

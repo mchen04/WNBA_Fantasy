@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+  
+  /* WNBA Brand Colors */
+  --wnba-orange: #FF6700;
+  --wnba-navy: #002D62;
+  
+  /* Semantic Colors */
+  --success: #10B981;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #3B82F6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #111827;
+    --foreground: #F9FAFB;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-wnba-gray-200;
+  }
+  
+  html {
+    @apply scroll-smooth;
+  }
+  
+  body {
+    @apply text-base;
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-wnba-gray-100;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-wnba-gray-400 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-wnba-gray-500;
+  }
+}
+
+@layer components {
+  /* Button variants */
+  .btn-primary {
+    @apply bg-wnba-orange text-white hover:bg-wnba-darkOrange focus:outline-none focus:ring-2 focus:ring-wnba-orange focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-wnba-navy text-white hover:bg-wnba-darkNavy focus:outline-none focus:ring-2 focus:ring-wnba-navy focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-outline {
+    @apply border border-wnba-gray-300 bg-white text-wnba-gray-700 hover:bg-wnba-gray-50 focus:outline-none focus:ring-2 focus:ring-wnba-orange focus:ring-offset-2 transition-colors;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-wnba-gray-200 p-6;
+  }
+  
+  .card-hover {
+    @apply card hover:shadow-md transition-shadow cursor-pointer;
+  }
+  
+  /* Table styles */
+  .table-header {
+    @apply bg-wnba-gray-50 font-semibold text-wnba-gray-700 text-xs uppercase tracking-wider;
+  }
+  
+  /* Form styles */
+  .input {
+    @apply block w-full rounded-md border-wnba-gray-300 shadow-sm focus:border-wnba-orange focus:ring-wnba-orange;
+  }
+  
+  .label {
+    @apply block text-sm font-medium text-wnba-gray-700 mb-1;
+  }
+  
+  /* Badge styles */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .badge-free {
+    @apply badge bg-wnba-gray-100 text-wnba-gray-800;
+  }
+  
+  .badge-pro {
+    @apply badge bg-orange-100 text-orange-800;
+  }
+  
+  .badge-pro-plus {
+    @apply badge bg-blue-100 text-blue-800;
+  }
+  
+  /* Stat card styles */
+  .stat-card {
+    @apply card flex flex-col;
+  }
+  
+  .stat-label {
+    @apply text-sm font-medium text-wnba-gray-600;
+  }
+  
+  .stat-value {
+    @apply text-2xl font-bold text-wnba-gray-900 mt-1;
+  }
+  
+  .stat-change {
+    @apply text-sm mt-2 flex items-center;
+  }
+  
+  .stat-change-positive {
+    @apply text-status-success;
+  }
+  
+  .stat-change-negative {
+    @apply text-status-error;
+  }
+}
+
+@layer utilities {
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  /* Loading skeleton */
+  .skeleton {
+    @apply animate-pulse bg-wnba-gray-200 rounded;
+  }
+  
+  /* Gradient backgrounds */
+  .gradient-wnba {
+    background: linear-gradient(135deg, var(--wnba-orange) 0%, var(--wnba-navy) 100%);
+  }
+  
+  .gradient-pro {
+    background: linear-gradient(135deg, #FF6700 0%, #E55A00 100%);
+  }
+  
+  .gradient-pro-plus {
+    background: linear-gradient(135deg, #002D62 0%, #001F42 100%);
+  }
+}

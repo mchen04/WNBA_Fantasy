@@ -1,0 +1,87 @@
+name: wnba-fantasy-analytics
+region: nyc
+
+databases:
+  - engine: PG
+    name: wnba-fantasy-db
+    size: db-s-1vcpu-1gb
+    version: "15"
+    production: true
+
+  - engine: REDIS
+    name: wnba-redis
+    size: db-s-1vcpu-1gb
+    version: "7"
+
+services:
+  - name: backend
+    github:
+      repo: YOUR_GITHUB_REPO
+      branch: main
+      deploy_on_push: true
+    build_command: npm run build
+    run_command: npm run start
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${wnba-fantasy-db.DATABASE_URL}
+      - key: REDIS_URL
+        scope: RUN_TIME
+        value: ${wnba-redis.REDIS_URL}
+      - key: JWT_SECRET
+        type: SECRET
+        value: YOUR_JWT_SECRET
+      - key: STRIPE_SECRET_KEY
+        type: SECRET
+        value: YOUR_STRIPE_SECRET_KEY
+      - key: STRIPE_WEBHOOK_SECRET
+        type: SECRET
+        value: YOUR_STRIPE_WEBHOOK_SECRET
+      - key: STRIPE_PRO_PRICE_ID
+        value: YOUR_STRIPE_PRO_PRICE_ID
+      - key: STRIPE_PRO_PLUS_PRICE_ID
+        value: YOUR_STRIPE_PRO_PLUS_PRICE_ID
+      - key: GOOGLE_CLIENT_ID
+        value: YOUR_GOOGLE_CLIENT_ID
+    source_dir: backend
+
+  - name: frontend
+    github:
+      repo: YOUR_GITHUB_REPO
+      branch: main
+      deploy_on_push: true
+    build_command: npm run build
+    run_command: npm run start
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: NEXT_PUBLIC_API_URL
+        value: ${backend.PUBLIC_URL}
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        value: YOUR_STRIPE_PUBLISHABLE_KEY
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        value: YOUR_GOOGLE_CLIENT_ID
+      - key: NEXTAUTH_URL
+        value: ${APP_URL}
+      - key: NEXTAUTH_SECRET
+        type: SECRET
+        value: YOUR_NEXTAUTH_SECRET
+      - key: GOOGLE_CLIENT_SECRET
+        type: SECRET
+        value: YOUR_GOOGLE_CLIENT_SECRET
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${wnba-fantasy-db.DATABASE_URL}
+    source_dir: frontend
+    routes:
+      - path: /
+
+domains:
+  - domain: YOUR_DOMAIN.com
+    type: PRIMARY

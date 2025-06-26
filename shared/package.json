@@ -1,0 +1,20 @@
+{
+  "name": "@wnba-fantasy/shared",
+  "version": "1.0.0",
+  "description": "Shared types, utilities, and constants for WNBA Fantasy Analytics",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}

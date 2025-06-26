@@ -1,0 +1,213 @@
+# Dependencies
+node_modules/
+*/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.local.example
+*/.env
+*/.env.*
+!*/.env.example
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+*/dist/
+*/build/
+*/.next/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+.coverage
+*.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+cover/
+*/coverage/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+.tmp/
+.temp/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+postgres_data/
+redis_data/
+*/postgres_data/
+*/redis_data/
+
+# Prisma
+prisma/migrations/dev/
+/backend/prisma/migrations/dev/
+.prisma/
+
+# Production files
+*.production
+*.prod
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+*.der
+*.p12
+*.pfx
+
+# Package files
+*.tgz
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+ENV/
+env/
+.Python
+
+# Claude and AI tools
+.claude/
+claude.md
+CLAUDE.md
+mcp.json
+.mcp/
+*.claude
+.ai/
+.copilot/
+
+# Deployment
+.vercel/
+.netlify/
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.vscode-test/
+.yarn-integrity
+
+# Optional npm cache
+.npm/
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Next.js
+next-env.d.ts
+
+# Stores
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Uploads
+uploads/
+*/uploads/
+
+# Misc
+*.seed
+*.pid
+*.pid.lock
+
+# TypeScript
+tsconfig.tsbuildinfo
+*/tsconfig.tsbuildinfo
+
+# Local History for VS Code
+.history/
+.ionide/
+
+# Yarn v2
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
