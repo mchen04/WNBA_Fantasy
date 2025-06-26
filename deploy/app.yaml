@@ -16,7 +16,7 @@ databases:
 services:
   - name: backend
     github:
-      repo: YOUR_GITHUB_REPO
+      repo: mchen04/WNBA_Fantasy
       branch: main
       deploy_on_push: true
     build_command: npm run build
@@ -52,7 +52,7 @@ services:
 
   - name: frontend
     github:
-      repo: YOUR_GITHUB_REPO
+      repo: mchen04/WNBA_Fantasy
       branch: main
       deploy_on_push: true
     build_command: npm run build
@@ -82,6 +82,6 @@ services:
     routes:
       - path: /
 
-domains:
-  - domain: YOUR_DOMAIN.com
-    type: PRIMARY
+# domains:
+#   - domain: YOUR_DOMAIN.com
+#     type: PRIMARY

@@ -1,0 +1,93 @@
+name: wnba-fantasy-analytics
+region: nyc
+
+services:
+  - name: backend
+    github:
+      repo: mchen04/WNBA_Fantasy
+      branch: main
+      deploy_on_push: true
+    build_command: npm install && npm run build
+    run_command: cd backend && node dist/index.js
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: DATABASE_URL
+        value: postgresql://db:5432/defaultdb?sslmode=require
+        type: SECRET
+      - key: REDIS_URL
+        value: redis://localhost:6379
+      - key: JWT_SECRET
+        value: your-jwt-secret-change-this-in-production
+        type: SECRET
+      - key: STRIPE_SECRET_KEY
+        value: sk_test_placeholder
+        type: SECRET
+      - key: STRIPE_WEBHOOK_SECRET
+        value: whsec_placeholder
+        type: SECRET
+      - key: STRIPE_PRO_PRICE_ID
+        value: price_placeholder_pro
+      - key: STRIPE_PRO_PLUS_PRICE_ID
+        value: price_placeholder_pro_plus
+      - key: GOOGLE_CLIENT_ID
+        value: placeholder.apps.googleusercontent.com
+      - key: ESPN_API_BASE_URL
+        value: https://site.api.espn.com/apis/site/v2/sports/basketball/wnba
+      - key: FRONTEND_URL
+        value: ${APP_URL}
+      - key: ALLOWED_ORIGINS
+        value: ${APP_URL}
+    source_dir: /
+
+  - name: frontend
+    github:
+      repo: mchen04/WNBA_Fantasy
+      branch: main
+      deploy_on_push: true
+    build_command: npm install && npm run build:shared && cd frontend && npm install && npm run build
+    run_command: cd frontend && npm run start
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: NEXT_PUBLIC_API_URL
+        value: ${APP_URL}/api
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        value: pk_test_placeholder
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        value: placeholder.apps.googleusercontent.com
+      - key: NEXTAUTH_URL
+        value: ${APP_URL}
+      - key: NEXTAUTH_SECRET
+        value: your-nextauth-secret-change-this
+        type: SECRET
+      - key: GOOGLE_CLIENT_SECRET
+        value: placeholder-secret
+        type: SECRET
+      - key: DATABASE_URL
+        value: postgresql://db:5432/defaultdb?sslmode=require
+        type: SECRET
+    source_dir: /
+    routes:
+      - path: /
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: backend
+        preserve_path_prefix: false
+        rewrite: /
+    - match:
+        path:
+          prefix: /
+      component:
+        name: frontend
