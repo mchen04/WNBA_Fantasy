@@ -2,6 +2,8 @@ import { logger } from '../utils/logger';
 import { prisma } from '../config/database';
 import { config } from '../config/env';
 import { Position, GameStatus, InjuryStatus } from '@prisma/client';
+import { espnService } from '../services/espnService';
+import { SEASON_CONFIG } from '@wnba-fantasy/shared';
 
 // ESPN API response interfaces
 interface EspnPlayerResponse {
@@ -253,12 +255,19 @@ export const fetchPlayerData = async () => {
       await processGames(gamesData);
     }
 
+    // Fetch and process individual game stats
+    await fetchAndProcessGameStats();
+
     logger.info('ESPN API data fetch completed successfully');
+    
+    // Get final stats count
+    const totalPlayerStats = await prisma.playerStats.count();
     
     return {
       success: true,
       playersProcessed: playersData.length,
       gamesProcessed: gamesData.length,
+      playerStatsProcessed: totalPlayerStats,
       timestamp: new Date(),
     };
 
@@ -274,20 +283,32 @@ export const fetchPlayerData = async () => {
   }
 };
 
-// Fetch players from ESPN API (placeholder implementation)
+// Fetch players from ESPN API
 const fetchPlayersFromEspn = async (): Promise<any[]> => {
-  // This would make actual HTTP requests to ESPN API
-  // For now, return empty array to avoid breaking
-  logger.debug('ESPN API player fetch not yet implemented, returning empty array');
-  return [];
+  try {
+    logger.info('Fetching all players from ESPN API...');
+    const players = await espnService.fetchAllPlayers();
+    logger.info(`Successfully fetched ${players.length} players from ESPN`);
+    return players;
+  } catch (error) {
+    logger.error('Failed to fetch players from ESPN:', error);
+    throw error;
+  }
 };
 
-// Fetch games from ESPN API (placeholder implementation)
+// Fetch games from ESPN API with comprehensive stats
 const fetchGamesFromEspn = async (): Promise<any[]> => {
-  // This would make actual HTTP requests to ESPN API
-  // For now, return empty array to avoid breaking
-  logger.debug('ESPN API games fetch not yet implemented, returning empty array');
-  return [];
+  try {
+    logger.info('Fetching all completed games with player stats from ESPN API...');
+    const gamesWithStats = await espnService.fetchAllCompletedGamesWithStats(SEASON_CONFIG.CURRENT_SEASON);
+    
+    const games = gamesWithStats.map(({ game }) => espnService.mapEspnGameToInternal(game));
+    logger.info(`Successfully fetched ${games.length} games with stats from ESPN`);
+    return games;
+  } catch (error) {
+    logger.error('Failed to fetch games from ESPN:', error);
+    throw error;
+  }
 };
 
 // Process and upsert players to database
@@ -296,7 +317,8 @@ const processPlayers = async (players: any[]) => {
   
   for (const playerData of players) {
     try {
-      await prisma.player.upsert({
+      // Upsert player
+      const player = await prisma.player.upsert({
         where: { espnId: playerData.espnId },
         update: {
           name: playerData.name,
@@ -330,6 +352,81 @@ const processPlayers = async (players: any[]) => {
           photoUrl: playerData.photoUrl,
         },
       });
+
+      // Handle injury status if present
+      if (playerData.injuryStatus && playerData.injuryStatus !== InjuryStatus.HEALTHY) {
+        const existingInjury = await prisma.playerInjury.findFirst({
+          where: {
+            playerId: player.id,
+            active: true,
+          },
+        });
+
+        if (existingInjury) {
+          await prisma.playerInjury.update({
+            where: { id: existingInjury.id },
+            data: {
+              status: playerData.injuryStatus,
+              description: playerData.injuryDescription || 'No details available',
+              reportedDate: new Date(),
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          await prisma.playerInjury.create({
+            data: {
+              playerId: player.id,
+              status: playerData.injuryStatus,
+              description: playerData.injuryDescription || 'No details available',
+              reportedDate: new Date(),
+              active: true,
+            },
+          });
+        }
+      } else {
+        // Mark any existing injuries as inactive if player is healthy
+        await prisma.playerInjury.updateMany({
+          where: {
+            playerId: player.id,
+            active: true,
+          },
+          data: {
+            active: false,
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      // Create current season stats if available
+      if (playerData.seasonAverages) {
+        const currentDate = new Date();
+        const seasonYear = currentDate.getFullYear();
+        
+        await prisma.playerStats.create({
+          data: {
+            playerId: player.id,
+            gameId: `${seasonYear}-season-avg`, // Special ID for season averages
+            date: currentDate,
+            minutes: playerData.seasonAverages.minutes || 0,
+            points: playerData.seasonAverages.points || 0,
+            rebounds: playerData.seasonAverages.rebounds || 0,
+            assists: playerData.seasonAverages.assists || 0,
+            steals: playerData.seasonAverages.steals || 0,
+            blocks: playerData.seasonAverages.blocks || 0,
+            turnovers: playerData.seasonAverages.turnovers || 0,
+            fouls: 0, // Not typically in season averages
+            fieldGoalsMade: 0,
+            fieldGoalsAttempted: 0,
+            threePointersMade: 0,
+            threePointersAttempted: 0,
+            freeThrowsMade: 0,
+            freeThrowsAttempted: 0,
+            plusMinus: 0,
+          },
+        });
+      }
+
+      logger.debug(`Processed player: ${playerData.name} (${playerData.team})`);
     } catch (error) {
       logger.error(`Failed to process player ${playerData.name}:`, error);
     }
@@ -377,4 +474,111 @@ const processGames = async (games: any[]) => {
   }
   
   logger.info('Game processing completed');
+};
+
+// Fetch and process individual game stats for all completed games
+const fetchAndProcessGameStats = async () => {
+  logger.info('Fetching and processing individual game stats...');
+  
+  try {
+    // Get all completed games with stats from ESPN
+    const gamesWithStats = await espnService.fetchAllCompletedGamesWithStats(SEASON_CONFIG.CURRENT_SEASON);
+    
+    let totalStatsProcessed = 0;
+    
+    for (const { game, boxScore } of gamesWithStats) {
+      try {
+        // First ensure the game exists in our database
+        const gameData = espnService.mapEspnGameToInternal(game);
+        const dbGame = await prisma.game.upsert({
+          where: { espnGameId: gameData.espnGameId },
+          update: gameData,
+          create: gameData
+        });
+        
+        // Extract player stats from the box score
+        const playerStats = espnService.extractPlayerStatsFromBoxScore(boxScore, new Date(game.competitions[0].date));
+        
+        // Process each player's stats
+        for (const playerStat of playerStats) {
+          try {
+            // Find the player in our database by ESPN ID
+            const player = await prisma.player.findUnique({
+              where: { espnId: playerStat.playerId }
+            });
+            
+            if (!player) {
+              logger.warn(`Player not found for ESPN ID: ${playerStat.playerId} (${playerStat.playerName})`);
+              continue;
+            }
+            
+            // Upsert the player stats for this game
+            await prisma.playerStats.upsert({
+              where: {
+                playerId_gameId: {
+                  playerId: player.id,
+                  gameId: dbGame.id
+                }
+              },
+              update: {
+                date: playerStat.stats.date,
+                minutes: Math.round(playerStat.stats.minutes || 0),
+                points: playerStat.stats.points || 0,
+                rebounds: playerStat.stats.rebounds || 0,
+                assists: playerStat.stats.assists || 0,
+                steals: playerStat.stats.steals || 0,
+                blocks: playerStat.stats.blocks || 0,
+                turnovers: playerStat.stats.turnovers || 0,
+                fouls: playerStat.stats.fouls || 0,
+                fieldGoalsMade: playerStat.stats.fieldGoalsMade || 0,
+                fieldGoalsAttempted: playerStat.stats.fieldGoalsAttempted || 0,
+                threePointersMade: playerStat.stats.threePointersMade || 0,
+                threePointersAttempted: playerStat.stats.threePointersAttempted || 0,
+                freeThrowsMade: playerStat.stats.freeThrowsMade || 0,
+                freeThrowsAttempted: playerStat.stats.freeThrowsAttempted || 0,
+                plusMinus: playerStat.stats.plusMinus || 0,
+                updatedAt: new Date()
+              },
+              create: {
+                playerId: player.id,
+                gameId: dbGame.id,
+                date: playerStat.stats.date,
+                minutes: Math.round(playerStat.stats.minutes || 0),
+                points: playerStat.stats.points || 0,
+                rebounds: playerStat.stats.rebounds || 0,
+                assists: playerStat.stats.assists || 0,
+                steals: playerStat.stats.steals || 0,
+                blocks: playerStat.stats.blocks || 0,
+                turnovers: playerStat.stats.turnovers || 0,
+                fouls: playerStat.stats.fouls || 0,
+                fieldGoalsMade: playerStat.stats.fieldGoalsMade || 0,
+                fieldGoalsAttempted: playerStat.stats.fieldGoalsAttempted || 0,
+                threePointersMade: playerStat.stats.threePointersMade || 0,
+                threePointersAttempted: playerStat.stats.threePointersAttempted || 0,
+                freeThrowsMade: playerStat.stats.freeThrowsMade || 0,
+                freeThrowsAttempted: playerStat.stats.freeThrowsAttempted || 0,
+                plusMinus: playerStat.stats.plusMinus || 0
+              }
+            });
+            
+            totalStatsProcessed++;
+            
+          } catch (statError) {
+            logger.error(`Failed to process stats for player ${playerStat.playerName}:`, statError);
+          }
+        }
+        
+        logger.debug(`Processed stats for game ${game.id} (${playerStats.length} player stat entries)`);
+        
+      } catch (gameError) {
+        logger.error(`Failed to process game ${game.id}:`, gameError);
+      }
+    }
+    
+    logger.info(`Successfully processed ${totalStatsProcessed} individual player game stats from ${gamesWithStats.length} games`);
+    
+  } catch (error) {
+    logger.error('Failed to fetch and process game stats:', error);
+    throw error;
+  }
 };

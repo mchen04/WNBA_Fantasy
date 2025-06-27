@@ -62,6 +62,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+backend.log
+frontend.log
 
 # Testing
 coverage/
@@ -138,12 +140,12 @@ env/
 # Claude and AI tools
 .claude/
 claude.md
-CLAUDE.md
 mcp.json
 .mcp/
 *.claude
 .ai/
 .copilot/
+# Note: /CLAUDE.md (project config) is intentionally NOT ignored
 
 # Deployment
 .vercel/

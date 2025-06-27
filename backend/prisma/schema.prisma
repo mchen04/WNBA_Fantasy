@@ -92,6 +92,7 @@ model PlayerInjury {
 
   player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
+  @@unique([playerId, active])
   @@index([playerId])
   @@index([active])
 }

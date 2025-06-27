@@ -6,6 +6,7 @@ import tradeRoutes from './trade';
 import waiverRoutes from './waiver';
 import subscriptionRoutes from './subscription';
 import statsRoutes from './stats';
+import { adminRoutes } from './admin';
 import { authenticate } from '../middleware/auth';
 
 export const setupRoutes = (app: Express) => {
@@ -19,6 +20,7 @@ export const setupRoutes = (app: Express) => {
   app.use('/api/waiver', authenticate, waiverRoutes);
   app.use('/api/subscription', authenticate, subscriptionRoutes);
   app.use('/api/stats', authenticate, statsRoutes);
+  app.use('/api/admin', authenticate, adminRoutes);
   
   // Stripe webhook (special case - no auth but signature verification)
   app.use('/api/webhook', require('./webhook').default);

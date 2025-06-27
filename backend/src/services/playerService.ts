@@ -389,6 +389,223 @@ export class PlayerService {
   }
 
   /**
+   * Get last N games for a player
+   */
+  async getPlayerLastNGames(playerId: string, n: number = 5): Promise<Array<{
+    date: Date;
+    opponent: string;
+    result: 'W' | 'L' | null;
+    minutes: number;
+    points: number;
+    rebounds: number;
+    assists: number;
+    steals: number;
+    blocks: number;
+    turnovers: number;
+    fouls: number;
+    threePointersMade: number;
+    fieldGoalsMade: number;
+    fieldGoalsAttempted: number;
+    threePointersAttempted: number;
+    freeThrowsMade: number;
+    freeThrowsAttempted: number;
+    plusMinus: number;
+    game: {
+      homeTeam: string;
+      awayTeam: string;
+      homeScore: number | null;
+      awayScore: number | null;
+      venue: string | null;
+    };
+  }>> {
+    try {
+      // Check cache first
+      const cacheKey = `player:${playerId}:last${n}games`;
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return cached as any[];
+      }
+
+      // Get player to find their team
+      const player = await prisma.player.findUnique({
+        where: { id: playerId },
+        select: { team: true, name: true }
+      });
+
+      if (!player) {
+        throw new AppError('Player not found', 404);
+      }
+
+      // Get the last N games with stats
+      const stats = await prisma.playerStats.findMany({
+        where: { playerId },
+        include: {
+          game: {
+            select: {
+              homeTeam: true,
+              awayTeam: true,
+              homeScore: true,
+              awayScore: true,
+              venue: true,
+              date: true,
+            },
+          },
+        },
+        orderBy: { date: 'desc' },
+        take: n,
+      });
+
+      const formattedStats = stats.map(stat => {
+        const isHome = stat.game.homeTeam === player.team;
+        const opponent = isHome ? stat.game.awayTeam : stat.game.homeTeam;
+        
+        // Determine result (W/L)
+        let result: 'W' | 'L' | null = null;
+        if (stat.game.homeScore !== null && stat.game.awayScore !== null) {
+          if (isHome) {
+            result = stat.game.homeScore > stat.game.awayScore ? 'W' : 'L';
+          } else {
+            result = stat.game.awayScore > stat.game.homeScore ? 'W' : 'L';
+          }
+        }
+
+        return {
+          date: stat.date,
+          opponent,
+          result,
+          minutes: stat.minutes,
+          points: stat.points,
+          rebounds: stat.rebounds,
+          assists: stat.assists,
+          steals: stat.steals,
+          blocks: stat.blocks,
+          turnovers: stat.turnovers,
+          fouls: stat.fouls,
+          threePointersMade: stat.threePointersMade,
+          fieldGoalsMade: stat.fieldGoalsMade,
+          fieldGoalsAttempted: stat.fieldGoalsAttempted,
+          threePointersAttempted: stat.threePointersAttempted,
+          freeThrowsMade: stat.freeThrowsMade,
+          freeThrowsAttempted: stat.freeThrowsAttempted,
+          plusMinus: stat.plusMinus,
+          game: stat.game,
+        };
+      });
+
+      // Cache the result for 15 minutes
+      await cache.set(cacheKey, formattedStats, CACHE_DURATIONS.PLAYER_STATS);
+
+      return formattedStats;
+    } catch (error) {
+      logger.error('Get player last N games failed:', error);
+      
+      if (error instanceof AppError) {
+        throw error;
+      }
+      
+      throw new AppError('Failed to retrieve player games', 500);
+    }
+  }
+
+  /**
+   * Get player recent averages (last N games)
+   */
+  async getPlayerRecentAverages(playerId: string, games: number = 5): Promise<{
+    gamesPlayed: number;
+    averages: {
+      minutes: number;
+      points: number;
+      rebounds: number;
+      assists: number;
+      steals: number;
+      blocks: number;
+      turnovers: number;
+      threePointersMade: number;
+      fieldGoalPercentage: number;
+      threePointPercentage: number;
+      freeThrowPercentage: number;
+    };
+  }> {
+    try {
+      const recentGames = await this.getPlayerLastNGames(playerId, games);
+      
+      if (recentGames.length === 0) {
+        return {
+          gamesPlayed: 0,
+          averages: {
+            minutes: 0,
+            points: 0,
+            rebounds: 0,
+            assists: 0,
+            steals: 0,
+            blocks: 0,
+            turnovers: 0,
+            threePointersMade: 0,
+            fieldGoalPercentage: 0,
+            threePointPercentage: 0,
+            freeThrowPercentage: 0,
+          },
+        };
+      }
+
+      const totals = recentGames.reduce((acc, game) => ({
+        minutes: acc.minutes + game.minutes,
+        points: acc.points + game.points,
+        rebounds: acc.rebounds + game.rebounds,
+        assists: acc.assists + game.assists,
+        steals: acc.steals + game.steals,
+        blocks: acc.blocks + game.blocks,
+        turnovers: acc.turnovers + game.turnovers,
+        threePointersMade: acc.threePointersMade + game.threePointersMade,
+        fieldGoalsMade: acc.fieldGoalsMade + game.fieldGoalsMade,
+        fieldGoalsAttempted: acc.fieldGoalsAttempted + game.fieldGoalsAttempted,
+        threePointersAttempted: acc.threePointersAttempted + game.threePointersAttempted,
+        freeThrowsMade: acc.freeThrowsMade + game.freeThrowsMade,
+        freeThrowsAttempted: acc.freeThrowsAttempted + game.freeThrowsAttempted,
+      }), {
+        minutes: 0,
+        points: 0,
+        rebounds: 0,
+        assists: 0,
+        steals: 0,
+        blocks: 0,
+        turnovers: 0,
+        threePointersMade: 0,
+        fieldGoalsMade: 0,
+        fieldGoalsAttempted: 0,
+        threePointersAttempted: 0,
+        freeThrowsMade: 0,
+        freeThrowsAttempted: 0,
+      });
+
+      const gamesPlayed = recentGames.length;
+
+      return {
+        gamesPlayed,
+        averages: {
+          minutes: totals.minutes / gamesPlayed,
+          points: totals.points / gamesPlayed,
+          rebounds: totals.rebounds / gamesPlayed,
+          assists: totals.assists / gamesPlayed,
+          steals: totals.steals / gamesPlayed,
+          blocks: totals.blocks / gamesPlayed,
+          turnovers: totals.turnovers / gamesPlayed,
+          threePointersMade: totals.threePointersMade / gamesPlayed,
+          fieldGoalPercentage: totals.fieldGoalsAttempted > 0 ? 
+            (totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 100 : 0,
+          threePointPercentage: totals.threePointersAttempted > 0 ? 
+            (totals.threePointersMade / totals.threePointersAttempted) * 100 : 0,
+          freeThrowPercentage: totals.freeThrowsAttempted > 0 ? 
+            (totals.freeThrowsMade / totals.freeThrowsAttempted) * 100 : 0,
+        },
+      };
+    } catch (error) {
+      logger.error('Get player recent averages failed:', error);
+      throw new AppError('Failed to retrieve player recent averages', 500);
+    }
+  }
+
+  /**
    * Get player stats with filtering
    */
   async getPlayerStats(playerId: string, query: StatsQueryInput): Promise<any[]> {

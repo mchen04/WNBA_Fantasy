@@ -143,7 +143,7 @@ export const WNBA_TEAMS = [
 ];
 
 export const SEASON_CONFIG = {
-  CURRENT_SEASON: 2024,
+  CURRENT_SEASON: 2025,
   SEASON_START_MONTH: 5, // May
   SEASON_END_MONTH: 9, // September
   GAMES_PER_TEAM: 40
