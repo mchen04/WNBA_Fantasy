@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { WAIVER_WIRE_CONFIG, CACHE_DURATIONS } from '@shared/constants';
 import { WaiverQueryInput } from '@shared/schemas';
 import { Position, InjuryStatus } from '@shared/types';
+import { Position as PrismaPosition, InjuryStatus as PrismaInjuryStatus } from '@prisma/client';
 
 export interface WaiverPlayer {
   id: string;
@@ -133,7 +134,7 @@ export class WaiverService {
           id: rec.player.id,
           name: rec.player.name,
           team: rec.player.team,
-          position: rec.player.position,
+          position: rec.player.position as Position,
           photoUrl: rec.player.photoUrl,
           injuryStatus: (rec.player.injuries[0]?.status || 'HEALTHY') as InjuryStatus,
         },
@@ -389,18 +390,23 @@ export class WaiverService {
         },
       });
 
+      // Calculate historical fantasy performance
+      const calculateFantasyPoints = (stat: any) => 
+        stat.points + stat.rebounds + stat.assists + (stat.steals * 2) + (stat.blocks * 2) + stat.threePointersMade - stat.turnovers;
+
       const historicalPerformance = {
         gamesPlayed: historicalGames.length,
         averagePoints: historicalGames.length > 0
           ? historicalGames.reduce((sum, g) => sum + g.points, 0) / historicalGames.length
           : 0,
-        averageFantasyPoints: 0, // Would calculate based on scoring config
+        averageFantasyPoints: historicalGames.length > 0
+          ? historicalGames.reduce((sum, g) => sum + calculateFantasyPoints(g), 0) / historicalGames.length
+          : 0,
       };
 
-      // Mock defensive ratings (would be calculated from actual data)
-      const opponentDefensiveRating = 100 + Math.random() * 20 - 10;
-      const leagueAverageDefensiveRating = 100;
-      const matchupFavorability = opponentDefensiveRating / leagueAverageDefensiveRating;
+      // Calculate real defensive ratings
+      const { opponentDefensiveRating, leagueAverageDefensiveRating, matchupFavorability } = 
+        await this.calculateDetailedMatchupAnalysis(player, opponent);
 
       return {
         playerId,
@@ -424,20 +430,193 @@ export class WaiverService {
   /**
    * Generate waiver recommendations for a specific date
    */
-  async generateRecommendations(date: string): Promise<WaiverRecommendation[]> {
+  async generateRecommendations(
+    date: string,
+    excludeTopN: number = WAIVER_WIRE_CONFIG.DEFAULT_EXCLUDE_TOP_N
+  ): Promise<WaiverRecommendation[]> {
     try {
-      // This would be a complex algorithm that considers:
-      // 1. Players not in top tiers
-      // 2. Upcoming games/matchups
-      // 3. Recent performance trends
-      // 4. Minutes and usage trends
-      // 5. Injury statuses
+      logger.info(`Generating waiver recommendations for ${date}, excluding top ${excludeTopN} players`);
       
-      // For now, return a placeholder
-      logger.info(`Generating waiver recommendations for ${date}`);
+      const targetDate = new Date(date);
       
-      // This would be implemented with the actual recommendation algorithm
-      return [];
+      // Step 1: Get games for the date
+      const games = await prisma.game.findMany({
+        where: {
+          date: {
+            gte: targetDate,
+            lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000),
+          },
+          status: { not: 'CANCELED' },
+        },
+      });
+
+      if (games.length === 0) {
+        logger.info(`No games scheduled for ${date}`);
+        return [];
+      }
+
+      // Step 2: Get teams playing today
+      const teamsPlaying = new Set<string>();
+      const teamMatchups = new Map<string, string>(); // team -> opponent
+      
+      games.forEach(game => {
+        teamsPlaying.add(game.homeTeam);
+        teamsPlaying.add(game.awayTeam);
+        teamMatchups.set(game.homeTeam, game.awayTeam);
+        teamMatchups.set(game.awayTeam, game.homeTeam);
+      });
+
+      // Step 3: Get top players to exclude
+      const topPlayerIds = await this.getTopPlayerIds(excludeTopN);
+
+      // Step 4: Get eligible players (playing today, not in top tier, not severely injured)
+      const eligiblePlayers = await prisma.player.findMany({
+        where: {
+          team: { in: Array.from(teamsPlaying) },
+          id: { notIn: topPlayerIds },
+          activeStatus: true,
+          NOT: {
+            injuries: {
+              some: {
+                active: true,
+                status: 'OUT',
+              },
+            },
+          },
+        },
+        include: {
+          fantasyScores: {
+            where: { scoringConfig: { isDefault: true } },
+            orderBy: { date: 'desc' },
+            take: 1,
+          },
+          consistencyMetrics: {
+            orderBy: { date: 'desc' },
+            take: 1,
+          },
+          trendingAnalyses: {
+            orderBy: { date: 'desc' },
+            take: 1,
+          },
+          injuries: {
+            where: { active: true },
+            take: 1,
+          },
+        },
+      });
+
+      // Step 5: Calculate recommendation scores for each player
+      const playerRecommendations = await Promise.all(
+        eligiblePlayers.map(async (player) => {
+          const opponent = teamMatchups.get(player.team) || 'Unknown';
+          
+          // Get projected fantasy points (use season average as baseline)
+          const projectedFantasyPoints = player.fantasyScores[0]?.seasonAverage || 0;
+          
+          // Calculate hot factor (recent vs season performance)
+          const hotFactor = await this.calculateHotFactor(player);
+          
+          // Calculate minutes trend
+          const minutesTrend = await this.calculateMinutesTrend(player);
+          
+          // Calculate matchup favorability
+          const matchupFavorability = await this.calculateMatchupFavorability(player, opponent);
+          
+          // Calculate composite recommendation score
+          const weights = WAIVER_WIRE_CONFIG.SCORING_WEIGHTS;
+          const recommendationScore = 
+            (projectedFantasyPoints * weights.projectedPoints) +
+            (hotFactor * weights.hotFactor) +
+            (minutesTrend * weights.minutesTrend) +
+            (matchupFavorability * weights.matchupFavorability);
+
+          // Generate reasoning
+          const reasoning = this.generateRecommendationReasoning({
+            player,
+            projectedFantasyPoints,
+            hotFactor,
+            minutesTrend,
+            matchupFavorability,
+            opponent,
+          });
+
+          return {
+            playerId: player.id,
+            projectedFantasyPoints,
+            hotFactor,
+            minutesTrend,
+            matchupFavorability,
+            recommendationScore,
+            opponent,
+            reasoning,
+          };
+        })
+      );
+
+      // Step 6: Sort by recommendation score and take top recommendations
+      playerRecommendations.sort((a, b) => b.recommendationScore - a.recommendationScore);
+      const topRecommendations = playerRecommendations.slice(0, WAIVER_WIRE_CONFIG.MAX_RECOMMENDATIONS);
+
+      // Step 7: Save recommendations to database
+      await prisma.waiverRecommendation.deleteMany({
+        where: { date: targetDate },
+      });
+
+      const savedRecommendations = await Promise.all(
+        topRecommendations.map(async (rec, index) => {
+          return await prisma.waiverRecommendation.create({
+            data: {
+              date: targetDate,
+              playerId: rec.playerId,
+              recommendationScore: rec.recommendationScore,
+              projectedFantasyPoints: rec.projectedFantasyPoints,
+              hotFactor: rec.hotFactor,
+              minutesTrend: rec.minutesTrend,
+              matchupFavorability: rec.matchupFavorability,
+              opponentTeam: rec.opponent,
+              rank: index + 1,
+              reasoning: rec.reasoning,
+            },
+          });
+        })
+      );
+
+      // Step 8: Convert to return format
+      const recommendations: WaiverRecommendation[] = await Promise.all(
+        savedRecommendations.map(async (rec) => {
+          const player = await prisma.player.findUnique({
+            where: { id: rec.playerId },
+            include: {
+              injuries: {
+                where: { active: true },
+                take: 1,
+              },
+            },
+          });
+
+          return {
+            rank: rec.rank,
+            player: {
+              id: player!.id,
+              name: player!.name,
+              team: player!.team,
+              position: player!.position as Position,
+              photoUrl: player!.photoUrl,
+              injuryStatus: (player!.injuries[0]?.status || 'HEALTHY') as InjuryStatus,
+            },
+            opponent: rec.opponentTeam,
+            recommendationScore: rec.recommendationScore,
+            projectedFantasyPoints: rec.projectedFantasyPoints,
+            hotFactor: rec.hotFactor,
+            minutesTrend: rec.minutesTrend,
+            matchupFavorability: rec.matchupFavorability,
+            reasoning: rec.reasoning,
+          };
+        })
+      );
+
+      logger.info(`Generated ${recommendations.length} waiver recommendations for ${date}`);
+      return recommendations;
     } catch (error) {
       logger.error('Generate recommendations failed:', error);
       throw new AppError('Failed to generate recommendations', 500);
@@ -606,6 +785,544 @@ export class WaiverService {
     } catch (error) {
       logger.error('Get player performance trend failed:', error);
       throw new AppError('Failed to get player performance trend', 500);
+    }
+  }
+
+  /**
+   * Calculate hot factor for a player - key algorithm for waiver recommendations
+   */
+  private async calculateHotFactor(player: any): Promise<number> {
+    try {
+      // Use existing trending analysis if available
+      if (player.trendingAnalyses && player.trendingAnalyses.length > 0) {
+        return player.trendingAnalyses[0].hotFactor;
+      }
+
+      // Fallback calculation based on recent vs season performance
+      const recentStats = await prisma.playerStats.findMany({
+        where: {
+          playerId: player.id,
+          date: {
+            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
+          },
+        },
+      });
+
+      const seasonStats = await prisma.playerStats.findMany({
+        where: { playerId: player.id },
+      });
+
+      if (recentStats.length === 0 || seasonStats.length === 0) {
+        return 0;
+      }
+
+      // Calculate fantasy points using default scoring
+      const calculateFantasyPoints = (stat: any) => 
+        stat.points + stat.rebounds + stat.assists + (stat.steals * 2) + (stat.blocks * 2) + stat.threePointersMade - stat.turnovers;
+
+      const recentAvg = recentStats.reduce((sum, stat) => sum + calculateFantasyPoints(stat), 0) / recentStats.length;
+      const seasonAvg = seasonStats.reduce((sum, stat) => sum + calculateFantasyPoints(stat), 0) / seasonStats.length;
+
+      if (seasonAvg === 0) return 0;
+
+      const hotFactor = (recentAvg - seasonAvg) / seasonAvg;
+      return Math.max(0, Math.min(1, hotFactor)); // Normalize to 0-1 range
+    } catch (error) {
+      logger.error('Calculate hot factor failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate minutes trend for a player
+   */
+  private async calculateMinutesTrend(player: any): Promise<number> {
+    try {
+      // Use existing trending analysis if available
+      if (player.trendingAnalyses && player.trendingAnalyses.length > 0) {
+        return player.trendingAnalyses[0].minutesTrendValue;
+      }
+
+      // Fallback calculation
+      const recentStats = await prisma.playerStats.findMany({
+        where: {
+          playerId: player.id,
+          date: {
+            gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), // Last 14 days
+          },
+        },
+        orderBy: { date: 'desc' },
+      });
+
+      if (recentStats.length < 3) {
+        return 0;
+      }
+
+      // Calculate linear trend in minutes
+      const recentMinutes = recentStats.slice(0, 7).reduce((sum, stat) => sum + stat.minutes, 0) / Math.min(7, recentStats.length);
+      const olderMinutes = recentStats.slice(7, 14).reduce((sum, stat) => sum + stat.minutes, 0) / Math.min(7, recentStats.slice(7).length);
+
+      if (olderMinutes === 0) return 0;
+
+      const minutesTrend = (recentMinutes - olderMinutes) / olderMinutes;
+      return Math.max(-1, Math.min(1, minutesTrend)); // Normalize to -1 to 1 range
+    } catch (error) {
+      logger.error('Calculate minutes trend failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate matchup favorability - Pro+ feature algorithm
+   */
+  private async calculateMatchupFavorability(player: any, opponent: string): Promise<number> {
+    try {
+      if (opponent === 'Unknown') {
+        return 0.5; // Neutral if no opponent info
+      }
+
+      // Get historical performance against this opponent
+      const historicalGames = await prisma.playerStats.findMany({
+        where: {
+          playerId: player.id,
+          game: {
+            OR: [
+              { homeTeam: opponent, awayTeam: player.team },
+              { homeTeam: player.team, awayTeam: opponent },
+            ],
+          },
+        },
+        include: { game: true },
+      });
+
+      // Get opponent's defensive stats (simplified - would use advanced metrics)
+      const opponentDefensiveStats = await prisma.playerStats.findMany({
+        where: {
+          game: {
+            OR: [
+              { homeTeam: opponent },
+              { awayTeam: opponent },
+            ],
+          },
+          date: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+          },
+        },
+      });
+
+      // Calculate opponent's points allowed per game (simplified defensive rating)
+      const opponentPointsAllowed = opponentDefensiveStats.length > 0 
+        ? opponentDefensiveStats.reduce((sum, stat) => sum + stat.points, 0) / opponentDefensiveStats.length
+        : 75; // League average approximation
+
+      // League average points per game
+      const leagueAverage = 75;
+
+      // Higher points allowed = better matchup for offensive players
+      let matchupFavorability = opponentPointsAllowed / leagueAverage;
+
+      // Boost based on historical performance
+      if (historicalGames.length > 0) {
+        const calculateFantasyPoints = (stat: any) => 
+          stat.points + stat.rebounds + stat.assists + (stat.steals * 2) + (stat.blocks * 2) + stat.threePointersMade - stat.turnovers;
+
+        const historicalAvg = historicalGames.reduce((sum, stat) => sum + calculateFantasyPoints(stat), 0) / historicalGames.length;
+        const playerSeasonAvg = player.fantasyScores[0]?.seasonAverage || 0;
+
+        if (playerSeasonAvg > 0) {
+          const historicalBoost = historicalAvg / playerSeasonAvg;
+          matchupFavorability = (matchupFavorability + historicalBoost) / 2;
+        }
+      }
+
+      return Math.max(0, Math.min(2, matchupFavorability)); // 0-2 range where 1 is neutral
+    } catch (error) {
+      logger.error('Calculate matchup favorability failed:', error);
+      return 0.5; // Neutral default
+    }
+  }
+
+  /**
+   * Generate human-readable reasoning for recommendation
+   */
+  private generateRecommendationReasoning(params: {
+    player: any;
+    projectedFantasyPoints: number;
+    hotFactor: number;
+    minutesTrend: number;
+    matchupFavorability: number;
+    opponent: string;
+  }): string {
+    const { player, projectedFantasyPoints, hotFactor, minutesTrend, matchupFavorability, opponent } = params;
+    
+    const reasons: string[] = [];
+
+    // Fantasy points reasoning
+    if (projectedFantasyPoints > 20) {
+      reasons.push('High scoring potential');
+    } else if (projectedFantasyPoints > 15) {
+      reasons.push('Solid fantasy production');
+    } else if (projectedFantasyPoints > 10) {
+      reasons.push('Decent fantasy floor');
+    }
+
+    // Hot streak reasoning
+    if (hotFactor > 0.2) {
+      reasons.push('Currently on a hot streak');
+    } else if (hotFactor > 0.1) {
+      reasons.push('Playing above season average');
+    } else if (hotFactor < -0.1) {
+      reasons.push('Recent performance below average');
+    }
+
+    // Minutes trend reasoning
+    if (minutesTrend > 0.15) {
+      reasons.push('Minutes trending upward');
+    } else if (minutesTrend > 0.05) {
+      reasons.push('Slight increase in playing time');
+    } else if (minutesTrend < -0.15) {
+      reasons.push('Minutes trending downward');
+    }
+
+    // Matchup reasoning
+    if (matchupFavorability > 1.2) {
+      reasons.push(`Excellent matchup vs ${opponent}`);
+    } else if (matchupFavorability > 1.05) {
+      reasons.push(`Good matchup vs ${opponent}`);
+    } else if (matchupFavorability < 0.9) {
+      reasons.push(`Challenging matchup vs ${opponent}`);
+    } else {
+      reasons.push(`Neutral matchup vs ${opponent}`);
+    }
+
+    // Injury status
+    if (player.injuries && player.injuries.length > 0) {
+      const injury = player.injuries[0];
+      if (injury.status === 'QUESTIONABLE') {
+        reasons.push('Questionable injury status - monitor closely');
+      } else if (injury.status === 'DOUBTFUL') {
+        reasons.push('Doubtful injury status - risky play');
+      }
+    }
+
+    return reasons.join('; ');
+  }
+
+  /**
+   * Calculate detailed matchup analysis with real defensive ratings
+   */
+  private async calculateDetailedMatchupAnalysis(player: any, opponent: string): Promise<{
+    opponentDefensiveRating: number;
+    leagueAverageDefensiveRating: number;
+    matchupFavorability: number;
+  }> {
+    try {
+      // Get last 15 games for opponent's defensive rating
+      const recentOpponentGames = await prisma.game.findMany({
+        where: {
+          OR: [
+            { homeTeam: opponent },
+            { awayTeam: opponent },
+          ],
+          status: 'FINAL',
+        },
+        include: {
+          playerStats: {
+            include: {
+              player: {
+                select: {
+                  team: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { date: 'desc' },
+        take: 15,
+      });
+
+      // Calculate opponent's defensive rating (points allowed per game)
+      let opponentPointsAllowed = 0;
+      let gameCount = 0;
+
+      recentOpponentGames.forEach(game => {
+        const opponentStats = game.playerStats.filter(stat => 
+          (game.homeTeam === opponent && stat.player.team === game.awayTeam) ||
+          (game.awayTeam === opponent && stat.player.team === game.homeTeam)
+        );
+        
+        const totalPoints = opponentStats.reduce((sum, stat) => sum + stat.points, 0);
+        opponentPointsAllowed += totalPoints;
+        gameCount++;
+      });
+
+      const opponentDefensiveRating = gameCount > 0 ? opponentPointsAllowed / gameCount : 75;
+
+      // Calculate league average defensive rating
+      const recentLeagueGames = await prisma.game.findMany({
+        where: {
+          status: 'FINAL',
+          date: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+          },
+        },
+        include: {
+          playerStats: {
+            include: {
+              player: {
+                select: {
+                  team: true,
+                },
+              },
+            },
+          },
+        },
+        take: 100, // Sample of recent games
+      });
+
+      let leaguePointsTotal = 0;
+      let leagueGameCount = 0;
+
+      recentLeagueGames.forEach(game => {
+        const homeTeamPoints = game.playerStats
+          .filter(stat => stat.player.team === game.homeTeam)
+          .reduce((sum, stat) => sum + stat.points, 0);
+        
+        const awayTeamPoints = game.playerStats
+          .filter(stat => stat.player.team === game.awayTeam)
+          .reduce((sum, stat) => sum + stat.points, 0);
+
+        leaguePointsTotal += homeTeamPoints + awayTeamPoints;
+        leagueGameCount += 2; // Two teams per game
+      });
+
+      const leagueAverageDefensiveRating = leagueGameCount > 0 ? leaguePointsTotal / leagueGameCount : 75;
+
+      // Calculate matchup favorability (higher = better for offensive players)
+      const matchupFavorability = opponentDefensiveRating / leagueAverageDefensiveRating;
+
+      return {
+        opponentDefensiveRating,
+        leagueAverageDefensiveRating,
+        matchupFavorability,
+      };
+    } catch (error) {
+      logger.error('Calculate detailed matchup analysis failed:', error);
+      
+      // Fallback to neutral ratings
+      return {
+        opponentDefensiveRating: 75,
+        leagueAverageDefensiveRating: 75,
+        matchupFavorability: 1.0,
+      };
+    }
+  }
+
+  /**
+   * Enhanced injury status filtering for recommendations
+   */
+  async getPlayersWithInjuryFilter(
+    playerIds: string[],
+    includeQuestionable: boolean = true,
+    includeDoubtful: boolean = false
+  ): Promise<string[]> {
+    try {
+      const excludeStatuses: PrismaInjuryStatus[] = [PrismaInjuryStatus.OUT];
+      
+      if (!includeQuestionable) {
+        excludeStatuses.push(PrismaInjuryStatus.QUESTIONABLE);
+      }
+      
+      if (!includeDoubtful) {
+        excludeStatuses.push(PrismaInjuryStatus.DOUBTFUL);
+      }
+      
+      const injuredPlayers = await prisma.playerInjury.findMany({
+        where: {
+          playerId: { in: playerIds },
+          active: true,
+          status: { in: excludeStatuses },
+        },
+        select: { playerId: true },
+      });
+      
+      const injuredPlayerIds = new Set(injuredPlayers.map(i => i.playerId));
+      return playerIds.filter(id => !injuredPlayerIds.has(id));
+    } catch (error) {
+      logger.error('Enhanced injury filtering failed:', error);
+      return playerIds; // Return all players if filtering fails
+    }
+  }
+
+  /**
+   * Get injury report summary for waiver wire
+   */
+  async getInjuryReport(): Promise<{
+    totalInjuries: number;
+    byStatus: Record<string, number>;
+    recentInjuries: Array<{
+      playerId: string;
+      playerName: string;
+      team: string;
+      status: string;
+      description: string;
+      reportedDate: Date;
+    }>;
+  }> {
+    try {
+      const cacheKey = 'waiver:injury_report';
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return cached as any;
+      }
+      
+      const activeInjuries = await prisma.playerInjury.findMany({
+        where: { active: true },
+        include: {
+          player: {
+            select: {
+              name: true,
+              team: true,
+            },
+          },
+        },
+        orderBy: { reportedDate: 'desc' },
+      });
+      
+      const byStatus = activeInjuries.reduce((acc, injury) => {
+        acc[injury.status] = (acc[injury.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      const recentInjuries = activeInjuries.slice(0, 10).map(injury => ({
+        playerId: injury.playerId,
+        playerName: injury.player.name,
+        team: injury.player.team,
+        status: injury.status,
+        description: injury.description || '',
+        reportedDate: injury.reportedDate,
+      }));
+      
+      const report = {
+        totalInjuries: activeInjuries.length,
+        byStatus,
+        recentInjuries,
+      };
+      
+      // Cache for 1 hour
+      await cache.set(cacheKey, report, 60 * 60);
+      
+      return report;
+    } catch (error) {
+      logger.error('Get injury report failed:', error);
+      throw new AppError('Failed to retrieve injury report', 500);
+    }
+  }
+
+  /**
+   * Get defensive efficiency metrics for a team
+   */
+  async getTeamDefensiveMetrics(teamName: string, days: number = 30): Promise<{
+    pointsAllowedPerGame: number;
+    fieldGoalPercentageAllowed: number;
+    threePointPercentageAllowed: number;
+    reboundsAllowedPerGame: number;
+    turnoversForced: number;
+    defensiveEfficiency: number;
+  }> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      const games = await prisma.game.findMany({
+        where: {
+          OR: [
+            { homeTeam: teamName },
+            { awayTeam: teamName },
+          ],
+          status: 'FINAL',
+          date: { gte: startDate },
+        },
+        include: {
+          playerStats: {
+            include: {
+              player: {
+                select: {
+                  team: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (games.length === 0) {
+        return {
+          pointsAllowedPerGame: 75,
+          fieldGoalPercentageAllowed: 0.45,
+          threePointPercentageAllowed: 0.35,
+          reboundsAllowedPerGame: 35,
+          turnoversForced: 15,
+          defensiveEfficiency: 100,
+        };
+      }
+
+      let totalPointsAllowed = 0;
+      let totalFGM = 0;
+      let totalFGA = 0;
+      let total3PM = 0;
+      let total3PA = 0;
+      let totalReboundsAllowed = 0;
+      let totalTurnoversForced = 0;
+
+      games.forEach(game => {
+        const opponentStats = game.playerStats.filter(stat => 
+          (game.homeTeam === teamName && stat.player.team === game.awayTeam) ||
+          (game.awayTeam === teamName && stat.player.team === game.homeTeam)
+        );
+
+        totalPointsAllowed += opponentStats.reduce((sum, stat) => sum + stat.points, 0);
+        totalFGM += opponentStats.reduce((sum, stat) => sum + stat.fieldGoalsMade, 0);
+        totalFGA += opponentStats.reduce((sum, stat) => sum + stat.fieldGoalsAttempted, 0);
+        total3PM += opponentStats.reduce((sum, stat) => sum + stat.threePointersMade, 0);
+        total3PA += opponentStats.reduce((sum, stat) => sum + stat.threePointersAttempted, 0);
+        totalReboundsAllowed += opponentStats.reduce((sum, stat) => sum + stat.rebounds, 0);
+        totalTurnoversForced += opponentStats.reduce((sum, stat) => sum + stat.turnovers, 0);
+      });
+
+      const pointsAllowedPerGame = totalPointsAllowed / games.length;
+      const fieldGoalPercentageAllowed = totalFGA > 0 ? totalFGM / totalFGA : 0.45;
+      const threePointPercentageAllowed = total3PA > 0 ? total3PM / total3PA : 0.35;
+      const reboundsAllowedPerGame = totalReboundsAllowed / games.length;
+      const turnoversForced = totalTurnoversForced / games.length;
+
+      // Calculate a composite defensive efficiency score (lower is better)
+      const defensiveEfficiency = 
+        (pointsAllowedPerGame * 0.4) +
+        (fieldGoalPercentageAllowed * 100 * 0.3) +
+        (reboundsAllowedPerGame * 0.2) +
+        ((20 - turnoversForced) * 0.1); // Penalty for not forcing turnovers
+
+      return {
+        pointsAllowedPerGame,
+        fieldGoalPercentageAllowed,
+        threePointPercentageAllowed,
+        reboundsAllowedPerGame,
+        turnoversForced,
+        defensiveEfficiency,
+      };
+    } catch (error) {
+      logger.error('Get team defensive metrics failed:', error);
+      
+      // Return league average defaults
+      return {
+        pointsAllowedPerGame: 75,
+        fieldGoalPercentageAllowed: 0.45,
+        threePointPercentageAllowed: 0.35,
+        reboundsAllowedPerGame: 35,
+        turnoversForced: 15,
+        defensiveEfficiency: 100,
+      };
     }
   }
 }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validation';
-import { auth, requireSubscription } from '../middleware/auth';
+import { authenticate, requireSubscription } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { fetchPlayerData } from '../jobs/fetchPlayerData';
 import { calculateFantasyScores, calculateConsistencyMetrics, calculateTrendingAnalysis } from '../jobs/calculateFantasyScores';
@@ -11,7 +11,7 @@ import { prisma } from '../config/database';
 const router = Router();
 
 // Admin route to manually refresh all data
-router.post('/refresh-all-data', auth, async (req, res, next) => {
+router.post('/refresh-all-data', authenticate, async (req, res, next) => {
   try {
     logger.info('Manual data refresh initiated');
     
@@ -56,7 +56,7 @@ router.post('/refresh-all-data', auth, async (req, res, next) => {
 });
 
 // Admin route to process new game data (lighter weight update)
-router.post('/process-new-games', auth, async (req, res, next) => {
+router.post('/process-new-games', authenticate, async (req, res, next) => {
   try {
     logger.info('Processing new game data');
     
@@ -82,7 +82,7 @@ router.post('/process-new-games', auth, async (req, res, next) => {
 });
 
 // Get database statistics
-router.get('/stats', auth, async (req, res, next) => {
+router.get('/stats', authenticate, async (req, res, next) => {
   try {
     const stats = {
       players: await prisma.player.count(),
@@ -132,7 +132,7 @@ router.get('/stats', auth, async (req, res, next) => {
 });
 
 // Recalculate fantasy scores only
-router.post('/recalculate-scores', auth, async (req, res, next) => {
+router.post('/recalculate-scores', authenticate, async (req, res, next) => {
   try {
     logger.info('Recalculating fantasy scores');
     
@@ -153,7 +153,7 @@ router.post('/recalculate-scores', auth, async (req, res, next) => {
 });
 
 // Recalculate consistency metrics only
-router.post('/recalculate-consistency', auth, async (req, res, next) => {
+router.post('/recalculate-consistency', authenticate, async (req, res, next) => {
   try {
     logger.info('Recalculating consistency metrics');
     
@@ -174,7 +174,7 @@ router.post('/recalculate-consistency', auth, async (req, res, next) => {
 });
 
 // Recalculate trending analysis only
-router.post('/recalculate-trending', auth, async (req, res, next) => {
+router.post('/recalculate-trending', authenticate, async (req, res, next) => {
   try {
     logger.info('Recalculating trending analysis');
     

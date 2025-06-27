@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { SUBSCRIPTION_PLANS, TRADE_VALUE_WEIGHTS } from '@shared/constants';
 import { TradeAnalysisInput } from '@shared/schemas';
 import { SubscriptionTier, TradeRecommendation, Position, InjuryStatus } from '@shared/types';
+import { Position as PrismaPosition, InjuryStatus as PrismaInjuryStatus, TradeRecommendation as PrismaTradeRecommendation } from '@prisma/client';
 import { calculateCompositePlayerValue, calculateWaiverWireValue } from '@shared/utils';
 
 export interface PlayerTradeInfo {
@@ -353,15 +354,15 @@ export class TradeService {
       const trending = player.trendingAnalyses[0];
       const injury = player.injuries[0];
 
-      const healthScore = this.calculateHealthScore(injury?.status);
+      const healthScore = this.calculateHealthScore(injury?.status as InjuryStatus);
 
       return {
         id: player.id,
         name: player.name,
         team: player.team,
-        position: player.position,
+        position: player.position as Position,
         photoUrl: player.photoUrl,
-        injuryStatus: injury?.status || 'HEALTHY',
+        injuryStatus: (injury?.status || 'HEALTHY') as InjuryStatus,
         fantasyScore: fantasyScore ? {
           seasonAverage: fantasyScore.seasonAverage || 0,
           last7DaysAverage: fantasyScore.last7DaysAverage || 0,

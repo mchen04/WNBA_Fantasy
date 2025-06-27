@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { prisma } from '../config/database';
 import { DEFAULT_SCORING_CONFIG } from '@wnba-fantasy/shared';
+import { ConsistencyGrade, TrendDirection } from '@prisma/client';
 
 interface ScoringConfig {
   id: string;
@@ -247,18 +248,18 @@ function calculateCoefficientOfVariation(values: number[]): number {
   return stdDev / mean;
 }
 
-function getConsistencyGrade(cv: number): string {
-  if (cv <= 0.1) return 'A_PLUS';
-  if (cv <= 0.15) return 'A';
-  if (cv <= 0.2) return 'A_MINUS';
-  if (cv <= 0.25) return 'B_PLUS';
-  if (cv <= 0.3) return 'B';
-  if (cv <= 0.35) return 'B_MINUS';
-  if (cv <= 0.4) return 'C_PLUS';
-  if (cv <= 0.45) return 'C';
-  if (cv <= 0.5) return 'C_MINUS';
-  if (cv <= 0.6) return 'D';
-  return 'F';
+function getConsistencyGrade(cv: number): ConsistencyGrade {
+  if (cv <= 0.1) return ConsistencyGrade.A_PLUS;
+  if (cv <= 0.15) return ConsistencyGrade.A;
+  if (cv <= 0.2) return ConsistencyGrade.A_MINUS;
+  if (cv <= 0.25) return ConsistencyGrade.B_PLUS;
+  if (cv <= 0.3) return ConsistencyGrade.B;
+  if (cv <= 0.35) return ConsistencyGrade.B_MINUS;
+  if (cv <= 0.4) return ConsistencyGrade.C_PLUS;
+  if (cv <= 0.45) return ConsistencyGrade.C;
+  if (cv <= 0.5) return ConsistencyGrade.C_MINUS;
+  if (cv <= 0.6) return ConsistencyGrade.D;
+  return ConsistencyGrade.F;
 }
 
 export const calculateTrendingAnalysis = async () => {
@@ -336,8 +337,8 @@ export const calculateTrendingAnalysis = async () => {
   }
 };
 
-function getTrendDirection(value: number): string {
-  if (value > 0.05) return 'UP';
-  if (value < -0.05) return 'DOWN';
-  return 'STABLE';
+function getTrendDirection(value: number): TrendDirection {
+  if (value > 0.05) return TrendDirection.UP;
+  if (value < -0.05) return TrendDirection.DOWN;
+  return TrendDirection.STABLE;
 }

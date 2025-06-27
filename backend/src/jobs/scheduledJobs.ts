@@ -4,6 +4,7 @@ import { fetchPlayerData } from './fetchPlayerData';
 import { calculateFantasyScores, calculateConsistencyMetrics, calculateTrendingAnalysis } from './calculateFantasyScores';
 import { processNewGameData } from '../scripts/setup-database';
 import { prisma } from '../config/database';
+import { generateDailyRecommendations } from './generateRecommendations';
 
 class ScheduledJobManager {
   private isInitialized = false;
@@ -50,10 +51,19 @@ class ScheduledJobManager {
         name: 'weekly-refresh'
       });
 
+      // Job 5: Generate daily waiver recommendations (6 AM daily for Pro+ users)
+      const dailyRecommendationsJob = cron.schedule('0 6 * * *', async () => {
+        await this.safeExecute('daily-recommendations', this.generateDailyRecommendations.bind(this));
+      }, {
+        scheduled: false,
+        name: 'daily-recommendations'
+      });
+
       this.jobs.set('check-new-games', newGamesJob);
       this.jobs.set('daily-metrics', dailyMetricsJob);
       this.jobs.set('fantasy-scores', fantasyScoresJob);
       this.jobs.set('weekly-refresh', weeklyRefreshJob);
+      this.jobs.set('daily-recommendations', dailyRecommendationsJob);
 
       this.isInitialized = true;
       logger.info('✅ Scheduled jobs initialized successfully');
@@ -194,6 +204,29 @@ class ScheduledJobManager {
     }
   }
 
+  private async generateDailyRecommendations() {
+    logger.info('Generating daily waiver recommendations for Pro+ users...');
+    
+    try {
+      // Generate recommendations for today and tomorrow
+      const today = new Date().toISOString().split('T')[0];
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      const [todayResult, tomorrowResult] = await Promise.all([
+        generateDailyRecommendations(today),
+        generateDailyRecommendations(tomorrow),
+      ]);
+      
+      logger.info(`📊 Daily recommendations generated:
+        - Today (${today}): ${todayResult.recommendationsCount} recommendations
+        - Tomorrow (${tomorrow}): ${tomorrowResult.recommendationsCount} recommendations`);
+      
+    } catch (error) {
+      logger.error('❌ Failed to generate daily recommendations:', error);
+      throw error;
+    }
+  }
+
   // Manual trigger methods (for API endpoints)
   async triggerNewGameCheck() {
     await this.safeExecute('manual-new-games', this.checkForNewGames.bind(this));
@@ -209,6 +242,10 @@ class ScheduledJobManager {
 
   async triggerWeeklyRefresh() {
     await this.safeExecute('manual-weekly', this.weeklyComprehensiveRefresh.bind(this));
+  }
+
+  async triggerDailyRecommendations() {
+    await this.safeExecute('manual-recommendations', this.generateDailyRecommendations.bind(this));
   }
 }
 
